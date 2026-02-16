@@ -1,0 +1,23 @@
+# ----------------- BASE -----------------
+p, base,  /todolist,              POST
+p, base,  /todolist,              GET
+p, base,  /todolist/:listid,      GET
+p, base,  /todo/item,             POST
+p, base,  /todo/:listid/tasks, GET
+
+# ----------------- SHARE ----------------
+p, share, /todolist/:listid/share, POST
+
+# ----------------- ADMIN ----------------
+p, admin, /users,   POST
+p, admin, /users/:id, DELETE
+
+# --------- HERANÇA DE ROLES -------------
+g, share, base
+g, admin, share
+
+# --------- UTILIZADORES -----------------
+g, user1, admin
+g, user2, share
+g, admin, admin
+g, useress1, admin
