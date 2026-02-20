@@ -3,13 +3,13 @@ on:
   workflow_dispatch:
 
 env:
-  # Use ghcr.io for GitHub Container Registry
+  # GitHub Container Registry
   REGISTRY: ghcr.io
   # github.repository as <account>/<repo>
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # JOB 1 — até SAST (e FS scan)
+  # JOB 1 — até SAST + Trivy fs
   sast:
     runs-on: ubuntu-latest
     permissions:
@@ -27,7 +27,6 @@ jobs:
           distribution: temurin
           java-version: "21"
 
-      # Run unit tests
       - name: Build e testes (JUnit)
         run: mvn clean test
 
@@ -43,7 +42,7 @@ jobs:
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
 
-      # Trivy (repo filesystem scan: vuln + secrets + config)
+      # Trivy - filesystem scan (vuln + secrets + config)
       - name: Complete scan with Trivy (fs)
         uses: aquasecurity/trivy-action@0.20.0
         with:
@@ -64,21 +63,20 @@ jobs:
           name: trivy-fs-results
           path: trivy-results.sarif
 
-  # JOB 2 — build + scan imagem + push (depende do Job 1)
+  # JOB 2 — build + scan imagem (2d) + push multi-arch
   docker:
     needs: sast
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
-      # (só precisas disto se também fizeres upload-sarif aqui)
       security-events: write
 
     steps:
       - name: Checkout do código
         uses: actions/checkout@v4
 
-      # Login against GHCR
+      # Login GHCR
       - name: Log into registry ${{ env.REGISTRY }}
         uses: docker/login-action@v3
         with:
@@ -86,11 +84,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # Setup QEMU para emulação multi-arch
+      # QEMU + Buildx
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
-      # Setup Docker Buildx
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -100,7 +97,7 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
 
-      # (2d) Build AMD64 local (para scan da imagem antes do push final)
+      # (2d) Build AMD64 local (to scan the image BEFORE final push)
       - name: Build Docker image (amd64 for scan)
         id: build
         uses: docker/build-push-action@v5
@@ -113,7 +110,7 @@ jobs:
           push: false
           load: true
 
-      # (2d) Trivy image scan
+      # (2d) Scan image with Trivy
       - name: Run Trivy vulnerability scanner (image)
         uses: aquasecurity/trivy-action@0.33.1
         with:
@@ -122,19 +119,20 @@ jobs:
           output: trivy-image-results.sarif
           severity: CRITICAL,HIGH
 
-      - name: Upload artifact (image)
+      # (2d) Upload results as pipeline artifact
+      - name: Upload artifact to pipeline metadata (image)
         uses: actions/upload-artifact@v4
         with:
-          name: trivy-image-results
+          name: Generate artifact with Trivy image result
           path: trivy-image-results.sarif
 
-      # Se também quiseres aparecer em "Security > Code scanning alerts"
+      # Optional: also publish SARIF to Code Scanning
       - name: Upload SARIF (image)
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: trivy-image-results.sarif
 
-      # Push multi-arch (AMD64 + ARM64)
+      # Final push multi-arch (AMD64 + ARM64)
       - name: Push Docker image (multi-arch)
         uses: docker/build-push-action@v5
         with:
@@ -144,14 +142,3 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           platforms: linux/amd64,linux/arm64
           push: true
-
-      # (2e) Assinatura (cosign) — deixa ativo se já estás a fazer o ponto e)
-      # - name: Install cosign
-      #   uses: sigstore/cosign-installer@v3
-      #
-      # - name: Sign all image tags
-      #   run: |
-      #     echo "${{ steps.meta.outputs.tags }}" | tr ',' '\n' | while read tag; do
-      #       echo "Signing $tag ..."
-      #       cosign sign --yes "$tag"
-      #     done
